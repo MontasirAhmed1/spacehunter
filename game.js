@@ -9,7 +9,7 @@ let assetsLoaded = 0;
 const totalAssets = 3;
 function checkLoad() {
     assetsLoaded++;
-    if(assetsLoaded === totalAssets) console.log("All systems online.");
+    if(assetsLoaded === totalAssets) console.log("Systems Initialized.");
 }
 
 const playerImg = new Image(); playerImg.src = 'player.png'; playerImg.onload = checkLoad;
@@ -21,6 +21,7 @@ bgMusic.loop = true; bgMusic.volume = 0.4;
 let gameOverMusic = new Audio('gameover_sound_track.mp3');
 
 let isMuted = false, audioCtx, lastLowHealthBeep = 0, shakeAmount = 0;
+let debugMode = false; 
 
 function toggleMute() {
     isMuted = !isMuted;
@@ -32,6 +33,7 @@ function toggleMute() {
 let score, time, isPlaying = false, difficulty, lastEnemySpawn, startTime, lastShot;
 let player, bullets, enemies, enemyOrbs, gems, powerups, stars, keys = {};
 let laserTimer = 0, powerupCooldown = 0;
+let mouseX = 0, mouseY = 0, useMouse = false;
 
 function resize() {
     bgCanvas.width = window.innerWidth;
@@ -51,11 +53,11 @@ for (let i = 0; i < 100; i++) {
 
 // --- 3. GAME LOGIC ---
 function triggerDamage(amount) {
+    if (debugMode) return; 
     player.hp -= amount;
     shakeAmount = 15; 
     container.classList.add('damage-flash');
     setTimeout(() => container.classList.remove('damage-flash'), 150);
-    if ("vibrate" in navigator) navigator.vibrate(100);
     updateHealthUI();
     playSynthesizedSound(80, 'sawtooth', 0.3, 0.2);
     if (player.hp <= 0) endGame();
@@ -89,7 +91,7 @@ function startGame() {
 
     score = 0; time = 0; difficulty = 1; isPlaying = true;
     bullets = []; enemies = []; enemyOrbs = []; gems = []; powerups = [];
-    lastShot = 0; laserTimer = 0; powerupCooldown = 0;
+    lastShot = 0; laserTimer = 0; powerupCooldown = 0; useMouse = false;
     startTime = Date.now(); lastEnemySpawn = Date.now();
     
     player = { w: 50, h: 50, hp: 100 };
@@ -112,11 +114,29 @@ function endGame() {
 }
 
 // --- 4. INPUTS ---
-window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.code === 'Backquote') debugMode = !debugMode; 
+    if (debugMode) {
+        if (e.code === 'KeyL') laserTimer = 600; 
+        if (e.code === 'KeyH') { player.hp = 100; updateHealthUI(); }
+        if (e.code === 'KeyK') enemies = [];
+    }
+});
 window.addEventListener('keyup', e => keys[e.code] = false);
+
+canvas.addEventListener('mousemove', e => {
+    if (isPlaying) {
+        useMouse = true;
+        let rect = canvas.getBoundingClientRect();
+        mouseX = e.clientX - rect.left;
+        mouseY = e.clientY - rect.top;
+    }
+});
 
 canvas.addEventListener('touchmove', e => {
     e.preventDefault();
+    useMouse = false;
     if (!isPlaying || !player) return;
     let rect = canvas.getBoundingClientRect();
     player.x = (e.touches[0].clientX - rect.left) - player.w / 2;
@@ -145,23 +165,26 @@ function main() {
     if (isPlaying && player) {
         time = Math.floor((Date.now() - startTime) / 1000);
         document.getElementById('timer').innerText = time;
-        
-        // Difficulty scaling (faster spawn rate over time)
-        difficulty = 1 + (time / 35); 
+        difficulty = 1 + (time / 35);
 
         if (laserTimer > 0) laserTimer--;
         if (powerupCooldown > 0) powerupCooldown--;
 
-        if (player.hp < 30 && Date.now() - lastLowHealthBeep > 800) {
-            playSynthesizedSound(300, 'sine', 0.1, 0.1);
-            lastLowHealthBeep = Date.now();
-        }
+        // --- HYBRID MOVEMENT FIX ---
+        let isMovingKeyboard = keys['KeyA'] || keys['ArrowLeft'] || keys['KeyD'] || keys['ArrowRight'] || 
+                               keys['KeyW'] || keys['ArrowUp'] || keys['KeyS'] || keys['ArrowDown'];
 
-        let moveSpeed = 8;
-        if (keys['KeyA'] || keys['ArrowLeft']) player.x -= moveSpeed;
-        if (keys['KeyD'] || keys['ArrowRight']) player.x += moveSpeed;
-        if (keys['KeyW'] || keys['ArrowUp']) player.y -= moveSpeed;
-        if (keys['KeyS'] || keys['ArrowDown']) player.y += moveSpeed;
+        if (isMovingKeyboard) {
+            useMouse = false; 
+            let moveSpeed = 8;
+            if (keys['KeyA'] || keys['ArrowLeft']) player.x -= moveSpeed;
+            if (keys['KeyD'] || keys['ArrowRight']) player.x += moveSpeed;
+            if (keys['KeyW'] || keys['ArrowUp']) player.y -= moveSpeed;
+            if (keys['KeyS'] || keys['ArrowDown']) player.y += moveSpeed;
+        } else if (useMouse) {
+            player.x += (mouseX - (player.x + player.w / 2)) * 0.15;
+            player.y += (mouseY - (player.y + player.h / 2)) * 0.15;
+        }
 
         player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
         player.y = Math.max(0, Math.min(canvas.height - player.h, player.y));
@@ -171,17 +194,14 @@ function main() {
             lastShot = Date.now();
         }
 
-        // --- ENEMY SPAWN WITH FIXED RATIO ---
         if (Date.now() - lastEnemySpawn > 1200 / difficulty) {
-            // FIXED RATIO: Always ~25% Green Elite, 75% Pink
             const isGreen = Math.random() < 0.25; 
-            
             enemies.push({
                 x: Math.random() * (canvas.width - 65), y: -75,
                 w: isGreen ? 65 : 40, h: isGreen ? 40 : 40,
                 type: isGreen ? 'green' : 'pink',
                 hp: isGreen ? 3 : 1,
-                speed: (isGreen ? 1.5 : 3) * (Math.min(difficulty, 2.5) * 0.7), // Speed caps slightly so it's playable
+                speed: (isGreen ? 1.5 : 3) * (Math.min(difficulty, 3) * 0.7),
                 lastShot: 0, flicker: 0
             });
             lastEnemySpawn = Date.now();
@@ -189,17 +209,15 @@ function main() {
 
         if (laserTimer > 0) {
             let laserX = player.x + player.w / 2 - 15;
-            let laserW = 30;
             enemies.forEach((en, i) => {
-                if (en.x < laserX + laserW && en.x + en.w > laserX && en.y < player.y) {
+                if (en.x < laserX + 30 && en.x + en.w > laserX && en.y < player.y) {
                     score += en.type === 'green' ? 300 : 100;
                     enemies.splice(i, 1);
                     document.getElementById('score').innerText = score;
-                    playSynthesizedSound(100, 'sine', 0.05, 0.02);
                 }
             });
             enemyOrbs.forEach((orb, i) => {
-                if (orb.x < laserX + laserW && orb.x > laserX && orb.y < player.y) enemyOrbs.splice(i, 1);
+                if (orb.x < laserX + 30 && orb.x > laserX && orb.y < player.y) enemyOrbs.splice(i, 1);
             });
         }
 
@@ -222,7 +240,6 @@ function main() {
                 if (b.x > en.x && b.x < en.x + en.w && b.y > en.y && b.y < en.y + en.h) {
                     en.hp--; en.flicker = 5;
                     bullets.splice(bi, 1);
-                    playSynthesizedSound(400, 'square', 0.05);
                     if (en.hp <= 0) {
                         let rand = Math.random();
                         if (powerupCooldown <= 0) {
@@ -231,7 +248,6 @@ function main() {
                         }
                         if (en.type === 'green' && rand > 0.70) gems.push({x: en.x + en.w/4, y: en.y, w: 25, h: 25});
                         else if (en.type === 'pink' && rand > 0.85) gems.push({x: en.x + en.w/4, y: en.y, w: 25, h: 25});
-
                         score += en.type === 'green' ? 300 : 100;
                         enemies.splice(ei, 1);
                         document.getElementById('score').innerText = score;
@@ -256,17 +272,17 @@ function main() {
                 updateHealthUI(); gems.splice(gi, 1);
                 playSynthesizedSound(800, 'sine', 0.4, 0.15);
             }
+            if (g.y > canvas.height + 50) gems.splice(gi, 1);
         });
 
         powerups.forEach((p, pi) => {
             p.y += 3;
             if (p.x < player.x + player.w && p.x + p.w > player.x && p.y < player.y + player.h && p.y + p.h > player.y) {
-                laserTimer = 300; 
-                powerupCooldown = 600; 
+                laserTimer = 300; powerupCooldown = 600;
                 powerups.splice(pi, 1);
                 playSynthesizedSound(1200, 'sawtooth', 0.8, 0.2);
-                if ("vibrate" in navigator) navigator.vibrate([50, 50, 50]);
             }
+            if (p.y > canvas.height + 50) powerups.splice(pi, 1);
         });
 
         // --- DRAWING ---
@@ -309,6 +325,13 @@ function main() {
         if(assetsLoaded === totalAssets) ctx.drawImage(playerImg, player.x, player.y, player.w, player.h);
         ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; 
         bullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
+
+        if (debugMode) {
+            ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(10, 80, 210, 100);
+            ctx.fillStyle = "#0f0"; ctx.font = "14px monospace";
+            ctx.fillText("DEBUG MODE ACTIVE", 20, 105);
+            ctx.fillText("[L] Laser [H] Heal [K] Kill", 20, 130);
+                    }
     }
     ctx.restore();
     requestAnimationFrame(main);
