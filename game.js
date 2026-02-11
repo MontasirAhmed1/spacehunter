@@ -4,10 +4,17 @@ const bgCanvas = document.getElementById('bgCanvas');
 const bgCtx = bgCanvas.getContext('2d');
 const container = document.getElementById('game-container');
 
-// --- 1. ASSETS ---
-const playerImg = new Image(); playerImg.src = 'player.png';
-const enemyPinkImg = new Image(); enemyPinkImg.src = 'enemy.png';
-const enemyGreenImg = new Image(); enemyGreenImg.src = 'enemy_green.png';
+// --- 1. ASSETS & LOADING ---
+let assetsLoaded = 0;
+const totalAssets = 3;
+function checkLoad() {
+    assetsLoaded++;
+    if(assetsLoaded === totalAssets) console.log("All systems online.");
+}
+
+const playerImg = new Image(); playerImg.src = 'player.png'; playerImg.onload = checkLoad;
+const enemyPinkImg = new Image(); enemyPinkImg.src = 'enemy.png'; enemyPinkImg.onload = checkLoad;
+const enemyGreenImg = new Image(); enemyGreenImg.src = 'enemy_green.png'; enemyGreenImg.onload = checkLoad;
 
 let bgMusic = new Audio('background_music.mp3');
 bgMusic.loop = true; bgMusic.volume = 0.4;
@@ -28,8 +35,15 @@ let player, bullets, enemies, enemyOrbs, gems, stars, keys = {};
 function resize() {
     bgCanvas.width = window.innerWidth;
     bgCanvas.height = window.innerHeight;
-    canvas.width = canvas.offsetWidth;
-    canvas.height = canvas.offsetHeight;
+    // Set internal canvas resolution to match its CSS display size
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+    
+    // If game is active, keep player in bounds after resize
+    if(isPlaying && player) {
+        player.x = Math.min(player.x, canvas.width - player.w);
+        player.y = Math.min(player.y, canvas.height - player.h);
+    }
 }
 window.addEventListener('resize', resize);
 resize();
@@ -41,15 +55,13 @@ for (let i = 0; i < 100; i++) {
     stars.push({ x: Math.random() * window.innerWidth, y: Math.random() * window.innerHeight, size: Math.random() * 2, speed: Math.random() * 2 + 0.5 });
 }
 
-// --- 3. POLISH FUNCTIONS ---
+// --- 3. GAME LOGIC ---
 function triggerDamage(amount) {
     player.hp -= amount;
-    shakeAmount = 10; 
+    shakeAmount = 12; 
     container.classList.add('damage-flash');
     setTimeout(() => container.classList.remove('damage-flash'), 150);
-    
     if ("vibrate" in navigator) navigator.vibrate(100);
-    
     updateHealthUI();
     playSynthesizedSound(80, 'sawtooth', 0.3, 0.2);
     if (player.hp <= 0) endGame();
@@ -70,11 +82,13 @@ function playSynthesizedSound(freq, type, duration, vol = 0.05) {
 
 function updateHealthUI() {
     const hb = document.getElementById('health-bar');
+    if(!hb) return;
     hb.style.width = Math.max(0, player.hp) + "%";
     hb.style.background = player.hp < 30 ? "#ff007b" : "#00f2ff";
 }
 
 function startGame() {
+    resize(); // Force recalculate dimensions
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     gameOverMusic.pause();
     if (!isMuted) { bgMusic.currentTime = 0; bgMusic.play().catch(() => {}); }
@@ -83,7 +97,12 @@ function startGame() {
     bullets = []; enemies = []; enemyOrbs = []; gems = [];
     lastShot = 0; startTime = Date.now(); lastEnemySpawn = Date.now();
     
-    player = { x: canvas.width/2 - 25, y: canvas.height - 150, w: 50, h: 50, hp: 100 };
+    // SAFETY SPAWN: Centered and 150px from bottom
+    player = { 
+        w: 50, h: 50, hp: 100 
+    };
+    player.x = (canvas.width / 2) - (player.w / 2);
+    player.y = canvas.height - 150;
     
     updateHealthUI();
     document.getElementById('startMenu').style.display = 'none';
@@ -100,19 +119,31 @@ function endGame() {
     document.getElementById('gameOverScreen').style.display = 'flex';
 }
 
-// --- 4. THE LOOP ---
+// --- 4. INPUTS ---
 window.addEventListener('keydown', e => keys[e.code] = true);
 window.addEventListener('keyup', e => keys[e.code] = false);
 
 canvas.addEventListener('touchmove', e => {
     e.preventDefault();
-    if (!isPlaying) return;
+    if (!isPlaying || !player) return;
     let rect = canvas.getBoundingClientRect();
-    player.x = (e.touches[0].clientX - rect.left) - player.w / 2;
-    player.y = (e.touches[0].clientY - rect.top) - player.h / 2;
+    let touchX = e.touches[0].clientX - rect.left;
+    let touchY = e.touches[0].clientY - rect.top;
+    
+    // Center the ship on the finger
+    player.x = touchX - player.w / 2;
+    player.y = touchY - player.h / 2;
+
+    // Boundary constraints
+    if (player.x < 0) player.x = 0;
+    if (player.x > canvas.width - player.w) player.x = canvas.width - player.w;
+    if (player.y < 0) player.y = 0;
+    if (player.y > canvas.height - player.h) player.y = canvas.height - player.h;
 }, { passive: false });
 
+// --- 5. MAIN LOOP ---
 function main() {
+    // Starfield
     bgCtx.fillStyle = '#000'; bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
     bgCtx.fillStyle = '#FFF';
     stars.forEach(s => {
@@ -122,38 +153,41 @@ function main() {
 
     ctx.save();
     if (shakeAmount > 0) {
-        let sx = (Math.random() - 0.5) * shakeAmount;
-        let sy = (Math.random() - 0.5) * shakeAmount;
-        ctx.translate(sx, sy);
-        shakeAmount *= 0.9;
-        if (shakeAmount < 0.1) shakeAmount = 0;
+        ctx.translate((Math.random()-0.5)*shakeAmount, (Math.random()-0.5)*shakeAmount);
+        shakeAmount *= 0.85;
     }
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (isPlaying) {
+    if (isPlaying && player) {
         time = Math.floor((Date.now() - startTime) / 1000);
         document.getElementById('timer').innerText = time;
         difficulty = 1 + (time / 45);
 
+        // Low Health Beep
         if (player.hp < 30 && Date.now() - lastLowHealthBeep > 800) {
             playSynthesizedSound(300, 'sine', 0.1, 0.1);
             lastLowHealthBeep = Date.now();
         }
 
-        // FULL MOVEMENT (X and Y)
-        if (keys['KeyA'] && player.x > 0) player.x -= 8;
-        if (keys['KeyD'] && player.x < canvas.width - player.w) player.x += 8;
-        if (keys['KeyW'] && player.y > 0) player.y -= 8;
-        if (keys['KeyS'] && player.y < canvas.height - player.h) player.y += 8;
+        // Desktop Controls
+        let moveSpeed = 8;
+        if (keys['KeyA'] || keys['ArrowLeft']) player.x -= moveSpeed;
+        if (keys['KeyD'] || keys['ArrowRight']) player.x += moveSpeed;
+        if (keys['KeyW'] || keys['ArrowUp']) player.y -= moveSpeed;
+        if (keys['KeyS'] || keys['ArrowDown']) player.y += moveSpeed;
 
-        // SHOOTING LOGIC (Fixed)
+        // Boundaries
+        player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+        player.y = Math.max(0, Math.min(canvas.height - player.h, player.y));
+
+        // Auto-Fire
         if (Date.now() - lastShot > 200) {
             bullets.push({ x: player.x + player.w/2 - 2, y: player.y, w: 4, h: 18 });
             lastShot = Date.now();
         }
 
-        // Spawn Enemies
+        // Enemies
         if (Date.now() - lastEnemySpawn > 1100 / difficulty) {
             const isGreen = Math.random() < 0.22 * difficulty;
             enemies.push({
@@ -174,8 +208,10 @@ function main() {
                 enemyOrbs.push({ x: en.x + en.w/2, y: en.y + en.h, r: 7, speed: 2.2 * difficulty });
                 en.lastShot = Date.now();
             }
-            if (en.y > canvas.height) enemies.splice(i, 1);
-            if (player.x < en.x + en.w - 10 && player.x + player.w > en.x + 10 && player.y < en.y + en.h - 10 && player.y + player.h > en.y + 10) {
+            if (en.y > canvas.height + 100) enemies.splice(i, 1);
+            
+            // Player Collision (Tightened Hitbox)
+            if (player.x < en.x + en.w - 5 && player.x + player.w > en.x + 5 && player.y < en.y + en.h - 5 && player.y + player.h > en.y + 5) {
                 triggerDamage(25); enemies.splice(i, 1);
             }
         });
@@ -195,7 +231,7 @@ function main() {
                     }
                 }
             });
-            if (b.y < -20) bullets.splice(bi, 1);
+            if (b.y < -50) bullets.splice(bi, 1);
         });
 
         enemyOrbs.forEach((orb, oi) => {
@@ -203,7 +239,7 @@ function main() {
             if (orb.x > player.x && orb.x < player.x + player.w && orb.y > player.y && orb.y < player.y + player.h) {
                 triggerDamage(15); enemyOrbs.splice(oi, 1);
             }
-            if (orb.y > canvas.height) enemyOrbs.splice(oi, 1);
+            if (orb.y > canvas.height + 50) enemyOrbs.splice(oi, 1);
         });
 
         gems.forEach((g, gi) => {
@@ -213,9 +249,10 @@ function main() {
                 updateHealthUI(); gems.splice(gi, 1);
                 playSynthesizedSound(800, 'sine', 0.4, 0.15);
             }
-            if (g.y > canvas.height) gems.splice(gi, 1);
+            if (g.y > canvas.height + 50) gems.splice(gi, 1);
         });
 
+        // DRAWING
         ctx.shadowBlur = 15;
         ctx.shadowColor = '#00ff88'; ctx.fillStyle = '#00ff88';
         gems.forEach(g => {
@@ -232,7 +269,9 @@ function main() {
             ctx.filter = 'none';
         });
         
-        ctx.shadowColor = '#00f2ff'; ctx.drawImage(playerImg, player.x, player.y, player.w, player.h);
+        ctx.shadowColor = '#00f2ff'; 
+        ctx.drawImage(playerImg, player.x, player.y, player.w, player.h);
+        
         ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; 
         bullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
     }
