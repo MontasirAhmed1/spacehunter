@@ -3,44 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Space Hunter</title>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap" rel="stylesheet">
+    <title>Space Hunter: Elite Polished</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         body { margin: 0; background: #000; overflow: hidden; color: white; font-family: 'Orbitron', sans-serif; touch-action: none; }
         #bgCanvas { position: fixed; top: 0; left: 0; z-index: -1; }
+        
         #game-container {
             position: relative; width: 100vw; max-width: 450px; height: 100vh;
             margin: 0 auto; border-left: 2px solid #333; border-right: 2px solid #333;
-            background: rgba(0,0,0,0.4); overflow: hidden;
+            background: rgba(0,0,0,0.6); overflow: hidden;
+            transition: box-shadow 0.2s;
         }
+
+        /* Screen Flash for Damage */
+        .damage-flash { box-shadow: inset 0 0 50px #ff007b !important; }
+
         #gameCanvas { display: block; width: 100%; height: 100%; }
+        
         #ui-layer {
-            position: absolute; top: 10px; width: 100%;
+            position: absolute; top: 15px; width: 100%;
             display: flex; flex-direction: column; align-items: center;
-            pointer-events: none; text-shadow: 0 0 10px #00f2ff; font-size: 14px; z-index: 10;
+            pointer-events: none; text-shadow: 0 0 10px #00f2ff; z-index: 10;
         }
-        .stats-row { display: flex; justify-content: space-around; width: 80%; margin-bottom: 5px; }
+        .stats-row { display: flex; justify-content: space-around; width: 95%; font-weight: 700; letter-spacing: 1px; }
+        
+        #health-container {
+            width: 180px; height: 8px; background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(0, 242, 255, 0.5); border-radius: 10px; overflow: hidden; margin-top: 10px;
+        }
+        #health-bar {
+            width: 100%; height: 100%; background: #00f2ff;
+            box-shadow: 0 0 10px #00f2ff; transition: width 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
         #muteBtn {
-            position: absolute; top: 10px; right: 10px; z-index: 1000; 
-            background: rgba(0,0,0,0.5); border: 1px solid #00f2ff; color: #00f2ff; 
-            width: 32px; height: 32px; cursor: pointer; display: flex; 
-            align-items: center; justify-content: center; font-size: 16px; border-radius: 4px;
+            position: absolute; top: 15px; right: 15px; z-index: 1000; 
+            background: rgba(0,0,0,0.6); border: 1px solid #00f2ff; color: #00f2ff; 
+            width: 36px; height: 36px; cursor: pointer; display: flex; 
+            align-items: center; justify-content: center; font-size: 18px; border-radius: 8px;
         }
+
         .menu-overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 0, 0, 0.9); display: flex; flex-direction: column;
             justify-content: center; align-items: center; z-index: 100; text-align: center;
         }
-        h1 { color: #00f2ff; text-shadow: 0 0 20px #00f2ff; font-size: 32px; margin-bottom: 20px; }
-        .results { margin-bottom: 20px; line-height: 1.6; }
-        .best-label { color: #aaa; font-size: 12px; margin-top: 10px; border-top: 1px solid #333; padding-top: 10px; }
-        .highlight { color: #ff007b; font-weight: bold; }
+        h1 { color: #00f2ff; text-shadow: 0 0 20px #00f2ff; font-size: 32px; margin-bottom: 25px; }
+        .results { margin-bottom: 30px; line-height: 1.8; font-size: 18px; }
+        .highlight { color: #ff007b; font-weight: 900; }
+        
         button {
             background: transparent; color: #ff007b; border: 2px solid #ff007b;
-            padding: 12px 30px; font-size: 18px; cursor: pointer; font-family: 'Orbitron';
-            box-shadow: 0 0 10px #ff007b; transition: 0.3s;
+            padding: 14px 40px; font-size: 20px; cursor: pointer; font-family: 'Orbitron';
+            box-shadow: 0 0 15px #ff007b; border-radius: 4px; font-weight: 900;
         }
-        button:hover { background: #ff007b; color: white; }
+        button:hover { background: #ff007b; color: white; transform: scale(1.05); }
     </style>
 </head>
 <body>
@@ -52,24 +70,19 @@
                 <div>SCORE: <span id="score">0</span></div>
                 <div>TIME: <span id="timer">0</span>s</div>
             </div>
+            <div id="health-container"><div id="health-bar"></div></div>
         </div>
-
         <div id="startMenu" class="menu-overlay">
             <h1>SPACE HUNTER</h1>
             <button onclick="startGame()">START MISSION</button>
         </div>
-
         <div id="gameOverScreen" class="menu-overlay" style="display: none;">
             <h1 style="color: #ff007b;">MISSION FAILED</h1>
             <div class="results">
                 SCORE: <span id="finalScore" class="highlight">0</span><br>
-                TIME: <span id="finalTime" class="highlight">0</span>s
+                HIGH SCORE: <span id="bestScoreEnd">0</span>
             </div>
-            <div class="results best-label">
-                BEST SCORE: <span id="bestScoreEnd">0</span><br>
-                BEST TIME: <span id="bestTimeEnd">0</span>s
-            </div>
-            <button onclick="startGame()">RESTART</button>
+            <button onclick="startGame()">REDEPLOY</button>
         </div>
         <canvas id="gameCanvas"></canvas>
     </div>
