@@ -9,7 +9,7 @@ let assetsLoaded = 0;
 const totalAssets = 3;
 function checkLoad() {
     assetsLoaded++;
-    if(assetsLoaded === totalAssets) console.log("Systems Initialized.");
+    if(assetsLoaded === totalAssets) console.log("All systems online.");
 }
 
 const playerImg = new Image(); playerImg.src = 'player.png'; playerImg.onload = checkLoad;
@@ -22,6 +22,7 @@ let gameOverMusic = new Audio('gameover_sound_track.mp3');
 
 let isMuted = false, audioCtx, lastLowHealthBeep = 0, shakeAmount = 0;
 let debugMode = false; 
+let wasDebugUsed = false; // Tracks if cheats were used this run
 
 function toggleMute() {
     isMuted = !isMuted;
@@ -46,6 +47,7 @@ resize();
 
 let highScore = localStorage.getItem('spaceHunter_hiScore') || 0;
 
+// Background Stars Setup
 stars = [];
 for (let i = 0; i < 100; i++) {
     stars.push({ x: Math.random() * window.innerWidth, y: Math.random() * window.innerHeight, size: Math.random() * 2, speed: Math.random() * 2 + 0.5 });
@@ -53,7 +55,7 @@ for (let i = 0; i < 100; i++) {
 
 // --- 3. GAME LOGIC ---
 function triggerDamage(amount) {
-    if (debugMode) return; 
+    if (debugMode) return; // GOD MODE: No damage if debug is open
     player.hp -= amount;
     shakeAmount = 15; 
     container.classList.add('damage-flash');
@@ -92,6 +94,7 @@ function startGame() {
     score = 0; time = 0; difficulty = 1; isPlaying = true;
     bullets = []; enemies = []; enemyOrbs = []; gems = []; powerups = [];
     lastShot = 0; laserTimer = 0; powerupCooldown = 0; useMouse = false;
+    debugMode = false; wasDebugUsed = false; 
     startTime = Date.now(); lastEnemySpawn = Date.now();
     
     player = { w: 50, h: 50, hp: 100 };
@@ -107,7 +110,20 @@ function endGame() {
     isPlaying = false;
     bgMusic.pause();
     if (!isMuted) gameOverMusic.play().catch(() => {});
-    if (score > highScore) { highScore = score; localStorage.setItem('spaceHunter_hiScore', highScore); }
+    
+    const endTitle = document.querySelector('#gameOverScreen h1');
+    if (wasDebugUsed) {
+        endTitle.innerText = "DEBUG RUN - NO SCORE SAVED";
+        endTitle.style.color = "#ffff00"; // Yellow warning
+    } else {
+        endTitle.innerText = "MISSION FAILED";
+        endTitle.style.color = "#ff007b";
+        if (score > highScore) { 
+            highScore = score; 
+            localStorage.setItem('spaceHunter_hiScore', highScore); 
+        }
+    }
+
     document.getElementById('finalScore').innerText = score;
     document.getElementById('bestScoreEnd').innerText = highScore;
     document.getElementById('gameOverScreen').style.display = 'flex';
@@ -116,9 +132,17 @@ function endGame() {
 // --- 4. INPUTS ---
 window.addEventListener('keydown', e => {
     keys[e.code] = true;
-    if (e.code === 'Backquote') debugMode = !debugMode; 
+    // Toggle Debug Mode
+    if (e.code === 'Backquote') { // The Tilde Key (~)
+        debugMode = !debugMode; 
+        if(debugMode) wasDebugUsed = true;
+    }
+    // Debug Action Keys
     if (debugMode) {
-        if (e.code === 'KeyL') laserTimer = 600; 
+        if (e.code === 'KeyL') {
+            // Toggle: If ON turn OFF, if OFF turn ON (infinite)
+            laserTimer = (laserTimer > 0) ? 0 : 999999; 
+        }
         if (e.code === 'KeyH') { player.hp = 100; updateHealthUI(); }
         if (e.code === 'KeyK') enemies = [];
     }
@@ -143,8 +167,9 @@ canvas.addEventListener('touchmove', e => {
     player.y = (e.touches[0].clientY - rect.top) - player.h / 2;
 }, { passive: false });
 
-// --- 5. MAIN LOOP ---
+// --- 5. MAIN GAME LOOP ---
 function main() {
+    // 1. Draw Background
     bgCtx.fillStyle = '#000'; bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
     bgCtx.fillStyle = '#FFF';
     stars.forEach(s => {
@@ -153,6 +178,8 @@ function main() {
     });
 
     ctx.save();
+    
+    // 2. Camera Shake Effect
     let effectiveShake = shakeAmount;
     if (laserTimer > 0) effectiveShake += 3; 
     if (effectiveShake > 0) {
@@ -167,33 +194,38 @@ function main() {
         document.getElementById('timer').innerText = time;
         difficulty = 1 + (time / 35);
 
-        if (laserTimer > 0) laserTimer--;
+        // Timer Logic: Only countdown laser if NOT in debug mode
+        if (laserTimer > 0 && !debugMode) laserTimer--;
         if (powerupCooldown > 0) powerupCooldown--;
 
-        // --- HYBRID MOVEMENT FIX ---
+        // --- HYBRID MOVEMENT SYSTEM ---
         let isMovingKeyboard = keys['KeyA'] || keys['ArrowLeft'] || keys['KeyD'] || keys['ArrowRight'] || 
                                keys['KeyW'] || keys['ArrowUp'] || keys['KeyS'] || keys['ArrowDown'];
 
         if (isMovingKeyboard) {
-            useMouse = false; 
+            useMouse = false; // Keyboard overrides mouse
             let moveSpeed = 8;
             if (keys['KeyA'] || keys['ArrowLeft']) player.x -= moveSpeed;
             if (keys['KeyD'] || keys['ArrowRight']) player.x += moveSpeed;
             if (keys['KeyW'] || keys['ArrowUp']) player.y -= moveSpeed;
             if (keys['KeyS'] || keys['ArrowDown']) player.y += moveSpeed;
         } else if (useMouse) {
+            // Smooth mouse follow
             player.x += (mouseX - (player.x + player.w / 2)) * 0.15;
             player.y += (mouseY - (player.y + player.h / 2)) * 0.15;
         }
 
+        // Clamp player to screen
         player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
         player.y = Math.max(0, Math.min(canvas.height - player.h, player.y));
 
+        // Player Shooting
         if (laserTimer <= 0 && Date.now() - lastShot > 200) {
             bullets.push({ x: player.x + player.w/2 - 2, y: player.y, w: 4, h: 18 });
             lastShot = Date.now();
         }
 
+        // Enemy Spawning
         if (Date.now() - lastEnemySpawn > 1200 / difficulty) {
             const isGreen = Math.random() < 0.25; 
             enemies.push({
@@ -207,6 +239,7 @@ function main() {
             lastEnemySpawn = Date.now();
         }
 
+        // Laser Logic (Instant Kill)
         if (laserTimer > 0) {
             let laserX = player.x + player.w / 2 - 15;
             enemies.forEach((en, i) => {
@@ -221,19 +254,27 @@ function main() {
             });
         }
 
+        // Update Enemies
         enemies.forEach((en, i) => {
             en.y += en.speed;
             if(en.type === 'pink') en.x += Math.sin(en.y / 35) * 2.5; 
+            
+            // Green Ship Shooting Logic
             if(en.type === 'green' && Date.now() - en.lastShot > 3500 / difficulty) {
-                enemyOrbs.push({ x: en.x + en.w/2, y: en.y + en.h, r: 7, speed: 2.5 * difficulty });
+                // Speed is positive (4), so it adds to Y (Down)
+                enemyOrbs.push({ x: en.x + en.w/2, y: en.y + en.h, r: 7, speed: 4 }); 
                 en.lastShot = Date.now();
             }
+
             if (en.y > canvas.height + 50) enemies.splice(i, 1);
+            
+            // Player Collision
             if (player.x < en.x + en.w - 8 && player.x + player.w > en.x + 8 && player.y < en.y + en.h - 8 && player.y + player.h > en.y + 8) {
                 triggerDamage(25); enemies.splice(i, 1);
             }
         });
 
+        // Update Bullets
         bullets.forEach((b, bi) => {
             b.y -= 14;
             enemies.forEach((en, ei) => {
@@ -257,14 +298,16 @@ function main() {
             if (b.y < -50) bullets.splice(bi, 1);
         });
 
+        // Update Enemy Orbs
         enemyOrbs.forEach((orb, oi) => {
-            orb.y += orb.speed;
+            orb.y += orb.speed; // Moves DOWN
             if (orb.x > player.x && orb.x < player.x + player.w && orb.y > player.y && orb.y < player.y + player.h) {
                 triggerDamage(15); enemyOrbs.splice(oi, 1);
             }
             if (orb.y > canvas.height + 50) enemyOrbs.splice(oi, 1);
         });
 
+        // Update Gems
         gems.forEach((g, gi) => {
             g.y += 3;
             if (g.x < player.x + player.w && g.x + g.w > player.x && g.y < player.y + player.h && g.y + g.h > player.y) {
@@ -275,6 +318,7 @@ function main() {
             if (g.y > canvas.height + 50) gems.splice(gi, 1);
         });
 
+        // Update Powerups
         powerups.forEach((p, pi) => {
             p.y += 3;
             if (p.x < player.x + player.w && p.x + p.w > player.x && p.y < player.y + player.h && p.y + p.h > player.y) {
@@ -285,7 +329,8 @@ function main() {
             if (p.y > canvas.height + 50) powerups.splice(pi, 1);
         });
 
-        // --- DRAWING ---
+        // --- DRAWING SECTION ---
+        // Draw Powerups
         ctx.shadowBlur = 15;
         ctx.shadowColor = '#ffff00'; ctx.fillStyle = '#ffff00';
         powerups.forEach(p => {
@@ -294,6 +339,8 @@ function main() {
             ctx.lineTo(p.x + 2, p.y + 25); ctx.lineTo(p.x + 22, p.y + 8); ctx.lineTo(p.x + 12, p.y + 8);
             ctx.closePath(); ctx.fill();
         });
+
+        // Draw Gems
         ctx.shadowColor = '#ff0044'; ctx.fillStyle = '#ff0044';
         gems.forEach(g => {
             let x = g.x, y = g.y, w = g.w, h = g.h;
@@ -303,6 +350,8 @@ function main() {
             ctx.bezierCurveTo(x + w / 2, y + h * 0.75, x + w, y + h / 2, x + w, y + h / 4);
             ctx.bezierCurveTo(x + w, y, x + w / 2, y, x + w / 2, y + h / 4); ctx.fill();
         });
+
+        // Draw Laser
         if (laserTimer > 0) {
             ctx.shadowBlur = 40; ctx.shadowColor = '#00ffff';
             ctx.fillStyle = 'rgba(0, 255, 255, 0.4)';
@@ -313,25 +362,34 @@ function main() {
             ctx.arc(player.x + player.w/2, player.y + player.h/2, 45, 0, Math.PI*2);
             ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 3; ctx.stroke();
         }
+
+        // Draw Enemy Orbs
         ctx.shadowColor = '#ffaa00'; ctx.fillStyle = '#ffaa00';
         enemyOrbs.forEach(orb => { ctx.beginPath(); ctx.arc(orb.x, orb.y, orb.r, 0, Math.PI*2); ctx.fill(); });
+
+        // Draw Enemies
         enemies.forEach(en => {
             if (en.flicker > 0) { ctx.filter = 'brightness(3)'; en.flicker--; }
             ctx.shadowColor = en.type === 'green' ? '#00ff00' : '#ff007b';
             ctx.drawImage(en.type === 'green' ? enemyGreenImg : enemyPinkImg, en.x, en.y, en.w, en.h);
             ctx.filter = 'none';
         });
+
+        // Draw Player
         ctx.shadowColor = '#00f2ff'; 
         if(assetsLoaded === totalAssets) ctx.drawImage(playerImg, player.x, player.y, player.w, player.h);
+        
+        // Draw Bullets
         ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; 
         bullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
 
+        // --- DEBUG OVERLAY ---
         if (debugMode) {
-            ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(10, 80, 210, 100);
+            ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.fillRect(10, 80, 200, 80);
             ctx.fillStyle = "#0f0"; ctx.font = "14px monospace";
             ctx.fillText("DEBUG MODE ACTIVE", 20, 105);
-            ctx.fillText("[L] Laser [H] Heal [K] Kill", 20, 130);
-                    }
+            ctx.fillText("L: laser, H: heal, K: kill", 20, 135);
+        }
     }
     ctx.restore();
     requestAnimationFrame(main);
